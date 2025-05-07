@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "xApp-mcp-server": {
+      "command": "node",
+      "args": [
+        "/home/ubuntu/xApp-mcp-server/build/index.js"
+      ]
+    },
+    "A1-mcp-server": {
+      "command": "node",
+      "args": [
+        "/home/ubuntu/A1-mcp-server/build/index.js"
+      ]
+    },
+    "influx-mcp-server": {
+      "command": "node",
+      "args": [
+        "/home/ubuntu/influx-mcp-server/build/index.js"
+      ]
+    }
+  },
+  "ollama": {
+    "host": "http://192.168.31.124:11434",
+    "model": "myaniu/qwen2.5-1m:7b"
+  }
+}
