@@ -3,6 +3,9 @@ import { Ollama } from "ollama";
 import { OllamaMessage } from "../utils/types/ollamaTypes";
 import { ToolManager } from "./ToolManager";
 import { formatToolResponse } from "../utils/toolFormatters";
+import axios from "axios";
+
+const RAG_API_BASE = "http://192.168.31.132:8500";
 
 interface ErrorWithCause extends Error {
   cause?: {
@@ -30,6 +33,11 @@ export class ChatManager {
           "You are a helpful AI assistant. Please provide clear, accurate, and relevant responses to user queries. If you need to use tools to help answer a question, explain what you're doing.",
       },
     ];
+  }
+
+  reset() {
+    this.messages = []; // 清除所有上下文
+    console.log("🔁 上下文已重置");
   }
 
   async initialize() {
@@ -107,32 +115,73 @@ export class ChatManager {
 
   private async processUserInput(userInput: string) {
     this.messages.push({ role: "user", content: userInput });
-
+  
     try {
-      // Get initial response
+      // === 1. 查詢 RAG 記憶庫 ===
+      const recallRes = await axios.post(`${RAG_API_BASE}/recall`, { text: userInput });
+      const relatedDocs: any[] = recallRes.data.selected_docs || [];
+  
+      if (relatedDocs.length > 0) {
+        console.log(`✅ 使用了 RAG，共檢索到 ${relatedDocs.length} 筆資料`);
+        relatedDocs.forEach((doc, i) => {
+          console.log(`📚 [${i + 1}] 來源: ${doc.source_doc || '未知'}, 時間: ${doc.created_at || '未知'}`);
+          console.log(`    段落內容: ${doc.text.slice(0, 80)}...`); // 顯示部分文字
+        });
+  
+        // === 2. 插入包含來源的背景知識 ===
+        const contextText = relatedDocs.map((doc, i) => {
+          const source = doc.source_doc || "未知來源";
+          const time = doc.created_at || "未知時間";
+          const certainty = doc._additional?.certainty !== undefined
+            ? `${(doc._additional.certainty * 100).toFixed(1)}%`
+            : "未知";
+  
+          return `[${i + 1}] 來源: ${source}，時間: ${time}\n${doc.text}`;
+        }).join("\n\n");
+  
+        this.messages.push({
+          role: "system",
+          content: `
+  You are an intelligent assistant equipped with two key abilities:
+  1. You have access to background knowledge retrieved from a vector database (RAG). Use this information to support your answers whenever possible.
+  2. You can call external tools (via tool calls) to obtain necessary data or perform actions.
+  
+  Below is the relevant context retrieved from the knowledge base. When answering, you must quote the relevant sources using the format [1], [2], etc.
+  
+  ${contextText}
+          `.trim()
+        });
+  
+      } else {
+        console.log("❌ 沒有使用 RAG，查無相關知識。");
+      }
+  
+      // === 3. 呼叫 LLM ===
       const response = await this.ollama.chat({
         model: this.model,
         messages: this.messages as any[],
         tools: this.toolManager.tools,
       });
-
+  
       this.messages.push(response.message as OllamaMessage);
-
-      // If no tool calls, just show the response and we're done
+  
+      // === 4. Tool 呼叫處理 ===
       const toolCalls = response.message.tool_calls ?? [];
-      if (toolCalls.length === 0) {
-        console.log("Assistant:", response.message.content);
-        return;
+      if (toolCalls.length > 0) {
+        await this.handleToolCalls(toolCalls);
+        
+      } else {
+        console.log("Assistant 回覆:", response.message.content);
       }
-
-      // Handle tool calls and potential follow-ups
-      await this.handleToolCalls(toolCalls);
+  
     } catch (error) {
-      // Remove the failed message from history
-      this.messages.pop();
-      throw error; // Propagate the error to be handled by start()
+      this.messages.pop(); // 移除失敗訊息
+      console.error("處理過程中出錯：", error);
+      throw error;
     }
   }
+  
+  
 
   private async handleToolCalls(toolCalls: any[]) {
     console.log("Model is using tools to help answer...");

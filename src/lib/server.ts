@@ -69,13 +69,14 @@ app.get("/api/models", async (_, res) => {
 // 重置對話 API
 app.post("/api/chat/new", async (_, res) => {
   try {
-    chatManager.reset?.();
+    chatManager.reset(); //  清空上下文
     res.json({ message: "上下文已清除" });
   } catch (err) {
     console.error("重置對話錯誤：", err);
     res.status(500).json({ error: "重置對話失敗" });
   }
 });
+
 
 // 啟動伺服器
 app.listen(PORT, "0.0.0.0", () => {
