@@ -34,7 +34,7 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     const reply = await chatManager.handleUserInput(message);
-    res.json({ reply });
+    res.json(reply );
   } catch (err) {
     console.error("Error during chat:", err);
     res.status(500).json({ error: "伺服器處理錯誤：" + (err as Error).message });

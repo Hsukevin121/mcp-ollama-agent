@@ -3,19 +3,13 @@
     "xApp-mcp-server": {
       "command": "node",
       "args": [
-        "/home/ubuntu/xApp-mcp-server/build/index.js"
+        "/home/smo/xapp-mcp-server/build/index.js"
       ]
     },
     "A1-mcp-server": {
       "command": "node",
       "args": [
-        "/home/ubuntu/A1-mcp-server/build/index.js"
-      ]
-    },
-    "influx-mcp-server": {
-      "command": "node",
-      "args": [
-        "/home/ubuntu/influx-mcp-server/build/index.js"
+        "/home/smo/a1-mcp-server/build/index.js"
       ]
     }
   },

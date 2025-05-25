@@ -39,33 +39,25 @@ export class ChatManager {
         messages: [{ role: "user", content: "test" }],
         tools: [],
       });
-      console.log("Ollama 連線成功");
+      console.log("✅ Ollama 連線成功");
     } catch (error) {
       const err = error as ErrorWithCause;
       const errorMsg = err.message || "未知錯誤";
-      console.error(`Ollama 初始化失敗: ${errorMsg}`);
+      console.error(`❌ Ollama 初始化失敗: ${errorMsg}`);
       throw new Error(`Failed to connect to Ollama: ${errorMsg}`);
     }
   }
 
   reset() {
-    console.log("Resetting conversation state...");
-  
-    // 確保所有對話狀態清空
-    this.messages.length = 0;
-    this.toolUsageFlag = false;
-    this.toolErrorCount = 0;
-  
-    // 建立全新的 system prompt
-    this.messages.push({
-      role: "system",
-      content:
-        "You are a helpful AI assistant. If you need external data, you MUST use tools (e.g., get_kpi_status, snapshot_save) to retrieve it. Don't make assumptions."
-    });
-  
-    console.log("對話已重置為新狀態");
+    this.messages = [
+      {
+        role: "system",
+        content:
+          "You are a helpful AI assistant. If you need external data, you MUST use tools (e.g., get_kpi_status, snapshot_save) to retrieve it. Don't make assumptions."
+      }
+    ];
+    console.log("🔁 對話已重置");
   }
-  
 
   private compressHistory(maxMessages = 10) {
     if (this.messages.length > maxMessages) {
@@ -79,7 +71,7 @@ export class ChatManager {
         { role: "system", content: `Summary of previous conversation:\n${summary}` },
         ...recentMessages,
       ];
-      console.log("上下文已摘要壓縮");
+      console.log("🔁 上下文已摘要壓縮");
     }
   }
 
@@ -96,67 +88,36 @@ export class ChatManager {
       tool_used: this.toolUsageFlag,
       tool_errors: this.toolErrorCount
     });
-    console.log(`已記錄策略結果（成功: ${success}, 工具使用: ${this.toolUsageFlag}, 工具錯誤次數: ${this.toolErrorCount}）`);
+    console.log(`📦 已記錄策略結果（成功: ${success}, 工具使用: ${this.toolUsageFlag}, 工具錯誤次數: ${this.toolErrorCount}）`);
   }
-
-
-  private extractLatestToolResult(): { toolName: string; result: string } | null {
-    const toolMsg = [...this.messages].reverse().find((m) => m.role === "tool");
-    if (toolMsg && toolMsg.tool_call_id && toolMsg.content) {
-      return {
-        toolName: toolMsg.tool_call_id,
-        result: toolMsg.content
-      };
-    }
-    return null;
-  }
-  
 
   async handleUserInput(userInput: string): Promise<string> {
     this.toolUsageFlag = false;
     this.toolErrorCount = 0;
-    const prevToolCount = this.messages.filter(m => m.role === "tool").length;
     await this.processUserInput(userInput);
     const last = this.messages[this.messages.length - 1];
-    const newTools = this.messages.filter(m => m.role === "tool").slice(prevToolCount);
-    return {
-      reply: last?.content || "(No response)",
-      toolResult: newTools.length > 0
-        ? {
-            toolName: newTools[0].tool_call_id,
-            result: newTools[0].content
-          }
-        : undefined 
-    };
-    
+    return last?.content || "(No response)";
   }
 
   private async processUserInput(userInput: string, retryCount = 0) {
     this.messages.push({ role: "user", content: userInput });
 
     try {
-      const recallRes = await axios.post(`${RAG_API_BASE}/recall_sample_vector`, { text: userInput });
-      const relatedDocs = (recallRes.data.matches || []).filter((doc: any) => doc.certainty >= 0.75);
+      const recallRes = await axios.post(`${RAG_API_BASE}/recall`, { text: userInput });
+      const relatedDocs = (recallRes.data.selected_docs || []).filter((doc: any) => doc._additional?.certainty >= 0.75);
 
       if (relatedDocs.length > 0) {
         const contextText = relatedDocs
           .map((doc, i) => `[${i + 1}] 來源: ${doc.source_doc || "未知"}，時間: ${doc.created_at || "未知"}\n${doc.text}`)
           .join("\n\n");
-        console.log("📚 [RAG] 以下是檢索到的相關知識：");
-        relatedDocs.forEach((doc, i) => {
-          console.log(`🔹 [${i + 1}] (certainty: ${doc.certainty})`);
-          console.log(`    來源: ${doc.source_doc}`);
-          console.log(`    時間: ${doc.created_at}`);
-          console.log(`    內容:\n${doc.text}\n`);
-        });
+
         this.messages.push({
           role: "system",
           content: `以下為相關背景資訊，請引用來源 [1]、[2] 等格式回答：\n${contextText}`,
         });
       } else {
-        console.log("RAG 無相關結果。");
+        console.log("❌ RAG 無相關結果。");
       }
-
 
       const response = await this.ollama.chat({
         model: this.model,
@@ -168,11 +129,11 @@ export class ChatManager {
       const toolCalls = response.message.tool_calls ?? [];
 
       if (toolCalls.length > 0) {
-        console.log(`共收到 ${toolCalls.length} 個工具呼叫`);
+        console.log(`🛠️ 共收到 ${toolCalls.length} 個工具呼叫`);
         this.toolUsageFlag = true;
         await this.handleToolCalls(toolCalls, retryCount);
       } else {
-        console.log("LLM 回覆中未觸發工具。");
+        console.log("⚠️ LLM 回覆中未觸發工具。");
         await this.recordResult("LLM 回答未使用工具", false);
         console.log("Assistant:", response.message.content);
       }
@@ -221,8 +182,7 @@ export class ChatManager {
 
     this.messages.push(finalResponse.message);
     await this.recordResult(finalResponse.message.content, true);
-    console.log("Assistant 回覆:", finalResponse.message.content);
-    return finalResponse.message;
+    console.log("🤖 Assistant 回覆:", finalResponse.message.content);
   }
 
   private fixToolArguments(args: Record<string, unknown>, mappings: Record<string, string>) {
