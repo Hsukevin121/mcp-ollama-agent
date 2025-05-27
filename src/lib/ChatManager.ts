@@ -48,6 +48,19 @@ export class ChatManager {
     }
   }
 
+  private getSystemPrompt(): OllamaMessage {
+    return {
+      role: "system",
+      content: `你是一個 O-RAN 智慧系統中的 AI 助理，具備以下三種能力：
+- LLM 的推理與生成能力
+- MCP 工具的操作能力
+- 向量資料庫記憶（RAG）的查詢能力
+
+你的任務是進行一次策略部署實驗，並透過工具與資料觀察效能變化，以學習如何讓網路具備自我優化能力。
+`.trim()
+};
+  }
+
   reset() {
     console.log("Resetting conversation state...");
   
@@ -56,32 +69,9 @@ export class ChatManager {
     this.toolUsageFlag = false;
     this.toolErrorCount = 0;
   
-    // 建立全新的 system prompt
-    this.messages.push({
-      role: "system",
-      content:
-        "You are a helpful AI assistant. If you need external data, you MUST use tools (e.g., get_kpi_status, snapshot_save) to retrieve it. Don't make assumptions."
-    });
-  
     console.log("對話已重置為新狀態");
   }
   
-
-  private compressHistory(maxMessages = 10) {
-    if (this.messages.length > maxMessages) {
-      const recentMessages = this.messages.slice(-maxMessages);
-      const summary = this.messages
-        .slice(0, -maxMessages)
-        .map((m) => `${m.role}: ${m.content}`)
-        .join("\n");
-
-      this.messages = [
-        { role: "system", content: `Summary of previous conversation:\n${summary}` },
-        ...recentMessages,
-      ];
-      console.log("上下文已摘要壓縮");
-    }
-  }
 
   private async recordResult(summary: string, success: boolean, strategy?: Record<string, any>, source_doc?: string) {
     await axios.post(`${RAG_API_BASE}/record_result`, {
@@ -100,39 +90,79 @@ export class ChatManager {
   }
 
 
-  private extractLatestToolResult(): { toolName: string; result: string } | null {
-    const toolMsg = [...this.messages].reverse().find((m) => m.role === "tool");
-    if (toolMsg && toolMsg.tool_call_id && toolMsg.content) {
-      return {
-        toolName: toolMsg.tool_call_id,
-        result: toolMsg.content
-      };
+  
+
+  async handleUserInput(userInput: string): Promise<{
+    reply: string;
+    toolResults: { toolName: string; result: string }[];
+    triggeredTools: string[];  // ✅ 加上這一欄
+  }> {
+    this.toolUsageFlag = false;
+    this.toolErrorCount = 0;
+  
+    const prevToolCount = this.messages.filter(m => m.role === "tool").length;
+  
+    await this.processUserInput(userInput);
+  
+    const newTools = this.messages.filter(m => m.role === "tool").slice(prevToolCount);
+    const lastMsg = this.messages[this.messages.length - 1];
+  
+    const toolResults = newTools.map(m => ({
+      toolName: this.extractToolName(m.content),
+      result: m.content || ""
+    }));
+  
+    const triggeredTools = toolResults.map(t => t.toolName);  // ✅ 建立 triggered 工具清單
+  
+    return {
+      reply: lastMsg?.content || "(No response)",
+      toolResults,
+      triggeredTools
+    };
+  }
+  
+  
+  
+  private extractToolName(content: string): string {
+    try {
+      const match = content.match(/Tool\s+"(.+?)"\s+回傳結果/);
+      return match?.[1] ?? "unknown";
+    } catch {
+      return "unknown";
     }
-    return null;
   }
   
 
-  async handleUserInput(userInput: string): Promise<string> {
-    this.toolUsageFlag = false;
-    this.toolErrorCount = 0;
-    const prevToolCount = this.messages.filter(m => m.role === "tool").length;
-    await this.processUserInput(userInput);
-    const last = this.messages[this.messages.length - 1];
-    const newTools = this.messages.filter(m => m.role === "tool").slice(prevToolCount);
-    return {
-      reply: last?.content || "(No response)",
-      toolResult: newTools.length > 0
-        ? {
-            toolName: newTools[0].tool_call_id,
-            result: newTools[0].content
-          }
-        : undefined 
+  // 刪除 compressHistory，改為 summarizeConversation
+  private async summarizeConversation() {
+    // 取最近 6 則對話（可依需求調整）
+    const recentMessages = this.messages.slice(-6);
+    const summaryPrompt: OllamaMessage = {
+      role: "user",
+      content: "請用一句話摘要剛才這輪對話的重點（簡短即可）。"
     };
-    
+    const summaryRes = await this.ollama.chat({
+      model: this.model,
+      messages: [
+        this.getSystemPrompt(),
+        ...recentMessages,
+        summaryPrompt
+      ],
+      tools: [],
+    });
+    const summary = summaryRes.message.content;
+    console.log("本輪摘要:", summary);
+    await this.recordResult(summary, true);
+    return summary;
   }
 
   private async processUserInput(userInput: string, retryCount = 0) {
-    this.messages.push({ role: "user", content: userInput });
+    const conversation = [
+      this.getSystemPrompt(),
+      ...this.messages,
+      { role: "user", content: userInput }
+    ];
+    
 
     try {
       const recallRes = await axios.post(`${RAG_API_BASE}/recall_sample_vector`, { text: userInput });
@@ -157,10 +187,9 @@ export class ChatManager {
         console.log("RAG 無相關結果。");
       }
 
-
       const response = await this.ollama.chat({
         model: this.model,
-        messages: this.messages,
+        messages: conversation,
         tools: this.toolManager.tools,
       });
 
@@ -177,7 +206,9 @@ export class ChatManager {
         console.log("Assistant:", response.message.content);
       }
 
-      this.compressHistory();
+      // === 新增：每次對話後做一小段總結 ===
+      await this.summarizeConversation();
+
     } catch (error) {
       this.messages.pop();
       console.error("處理錯誤：", error);
@@ -207,9 +238,9 @@ export class ChatManager {
 
         this.messages.push({
           role: "tool",
-          content: formatted,
+          content: `🔧 Tool "${toolCall.function.name}" 回傳結果:\n${formatted}`,
           tool_call_id: toolCall.function.name,
-        });
+        });        
       }
     }
 

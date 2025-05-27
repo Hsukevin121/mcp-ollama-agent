@@ -19,7 +19,9 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "fs-extra": "^11.3.0",
+    "langchain": "^0.3.27",
     "ollama": "^0.5.11",
+    "openai": "^4.103.0",
     "path": "^0.12.7"
   },
   "devDependencies": {

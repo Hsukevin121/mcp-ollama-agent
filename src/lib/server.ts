@@ -33,11 +33,13 @@ app.post("/api/chat", async (req, res) => {
   }
 
   try {
-    const reply = await chatManager.handleUserInput(message);
-    res.json(reply );
+    const result = await chatManager.handleUserInput(message);
+    res.json({
+      reply: result.reply,
+      toolResults: result.toolResults || []
+    });
   } catch (err) {
-    console.error("Error during chat:", err);
-    res.status(500).json({ error: "伺服器處理錯誤：" + (err as Error).message });
+    res.status(500).json({ error: "AI 回覆失敗", detail: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -77,6 +79,18 @@ app.post("/api/chat/new", async (_, res) => {
   }
 });
 
+// LangChain API 訓練用
+import { XappTrainer } from "./XappTrainer";
+const trainer = new XappTrainer(chatManager);
+app.post("/api/train", async (_, res) => {
+  try {
+    await trainer.trainXappFlow();
+    res.json({ message: "訓練流程完成" });
+  } catch (err) {
+    console.error("訓練流程失敗：", err);
+    res.status(500).json({ error: "訓練失敗" });
+  }
+});
 
 // 啟動伺服器
 app.listen(PORT, "0.0.0.0", () => {
