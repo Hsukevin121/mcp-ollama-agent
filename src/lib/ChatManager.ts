@@ -133,28 +133,7 @@ export class ChatManager {
   }
   
 
-  // 刪除 compressHistory，改為 summarizeConversation
-  private async summarizeConversation() {
-    // 取最近 6 則對話（可依需求調整）
-    const recentMessages = this.messages.slice(-6);
-    const summaryPrompt: OllamaMessage = {
-      role: "user",
-      content: "請用一句話摘要剛才這輪對話的重點（簡短即可）。"
-    };
-    const summaryRes = await this.ollama.chat({
-      model: this.model,
-      messages: [
-        this.getSystemPrompt(),
-        ...recentMessages,
-        summaryPrompt
-      ],
-      tools: [],
-    });
-    const summary = summaryRes.message.content;
-    console.log("本輪摘要:", summary);
-    await this.recordResult(summary, true);
-    return summary;
-  }
+  // 以往會在對話後執行 summarizeConversation，但目前此功能已移除
 
   private async processUserInput(userInput: string, retryCount = 0) {
     const conversation = [
@@ -164,28 +143,28 @@ export class ChatManager {
     ];
     
 
-    try {
-      const recallRes = await axios.post(`${RAG_API_BASE}/recall_sample_vector`, { text: userInput });
-      const relatedDocs = (recallRes.data.matches || []).filter((doc: any) => doc.certainty >= 0.75);
+      try {
+        // const recallRes = await axios.post(`${RAG_API_BASE}/recall_sample_vector`, { text: userInput });
+        // const relatedDocs = (recallRes.data.matches || []).filter((doc: any) => doc.certainty >= 0.75);
 
-      if (relatedDocs.length > 0) {
-        const contextText = relatedDocs
-          .map((doc, i) => `[${i + 1}] 來源: ${doc.source_doc || "未知"}，時間: ${doc.created_at || "未知"}\n${doc.text}`)
-          .join("\n\n");
-        console.log("📚 [RAG] 以下是檢索到的相關知識：");
-        relatedDocs.forEach((doc, i) => {
-          console.log(`🔹 [${i + 1}] (certainty: ${doc.certainty})`);
-          console.log(`    來源: ${doc.source_doc}`);
-          console.log(`    時間: ${doc.created_at}`);
-          console.log(`    內容:\n${doc.text}\n`);
-        });
-        this.messages.push({
-          role: "system",
-          content: `以下為相關背景資訊，請引用來源 [1]、[2] 等格式回答：\n${contextText}`,
-        });
-      } else {
-        console.log("RAG 無相關結果。");
-      }
+        // if (relatedDocs.length > 0) {
+        //   const contextText = relatedDocs
+        //     .map((doc, i) => `[${i + 1}] 來源: ${doc.source_doc || "未知"}，時間: ${doc.created_at || "未知"}\n${doc.text}`)
+        //     .join("\n\n");
+        //   console.log("📚 [RAG] 以下是檢索到的相關知識：");
+        //   relatedDocs.forEach((doc, i) => {
+        //     console.log(`🔹 [${i + 1}] (certainty: ${doc.certainty})`);
+        //     console.log(`    來源: ${doc.source_doc}`);
+        //     console.log(`    時間: ${doc.created_at}`);
+        //     console.log(`    內容:\n${doc.text}\n`);
+        //   });
+        //   this.messages.push({
+        //     role: "system",
+        //     content: `以下為相關背景資訊，請引用來源 [1]、[2] 等格式回答：\n${contextText}`,
+        //   });
+        // } else {
+        //   console.log("RAG 無相關結果。");
+        // }
 
       const response = await this.ollama.chat({
         model: this.model,
@@ -207,7 +186,7 @@ export class ChatManager {
       }
 
       // === 新增：每次對話後做一小段總結 ===
-      await this.summarizeConversation();
+      // await this.summarizeConversation();  // 功能已暫停
 
     } catch (error) {
       this.messages.pop();
