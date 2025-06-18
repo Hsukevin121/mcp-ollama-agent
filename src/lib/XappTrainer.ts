@@ -55,7 +55,7 @@ export class XappTrainer {
       {
         name: "Step 1: 取得KPI並診斷",
         prompts: [
-          { prompt: "請執行工具 get_kpi_status 檢查目前網路狀況", tool: "get_kpi_status" },
+          { prompt: "請執行工具 get_kpi_status 檢查目前網路狀況，不要解釋", tool: "get_kpi_status" },
           { prompt: "請根據剛才的KPI結果診斷目前網路狀態，並提出優化建議", tool: "" }
         ]
       },
@@ -63,21 +63,21 @@ export class XappTrainer {
       {
         name: "Step 2: 快取記錄KPI",
         prompts: [
-          { prompt: "請執行工具 snapshot_save 儲存目前 KPI 為 baseline", tool: "snapshot_save" }
+          { prompt: "請執行工具 snapshot_save 儲存目前 KPI 為 baseline，不要解釋", tool: "snapshot_save" }
         ]
       },
       // 3. 查詢所有xApp
       {
         name: "Step 3: 查詢所有xApp",
         prompts: [
-          { prompt: "請執行工具 list_xapps 查看目前 xApp 列表", tool: "list_xapps" }
+          { prompt: "請執行工具 list_xapps 查看目前 xApp 列表，不要解釋", tool: "list_xapps" }
         ]
       },
       // 4. 建立新xApp（需避免重複）
       {
         name: "Step 4: 建立新xApp",
         prompts: [
-          { prompt: `請執行工具 create_xapp 建立 ${this.appName}，policy_id 為 ${this.policyId}，並避免名稱或策略ID重複`, tool: "create_xapp" }
+          { prompt: `請執行工具 create_xapp 建立 ${this.appName}，policy_id 為 ${this.policyId}，並避免名稱或策略ID重複，不要解釋`, tool: "create_xapp" }
         ]
       },
       // 5. 再次獲取KPI
@@ -98,7 +98,27 @@ export class XappTrainer {
       {
         name: "Step 7: 判斷與修改xApp程式碼",
         prompts: [
-          { prompt: `請判斷剛才的 xapp config 檔案是否需要修改參數，如需修改請直接執行工具 update_config，並提供 app_name 及完整 config_text 內容，不要解釋。`, tool: "update_config" }
+          { prompt: `請根據以下 xapp config 判斷是否需要修改參數（如 MIN_SINR、PRB_THRESHOLD、UE_THRESHOLD），
+若需修改，請直接執行工具 update_config，並提供 app_name 與完整的 config_text（C語言格式）。
+不要輸出其他資訊或 JSON 格式，也不要解釋。
+
+xapp config 檔案內容如下：
+#ifndef XAPP_CONFIG_H
+#define XAPP_CONFIG_H
+
+// === 共用參數（各種 xApp 都可參考） ===
+#define MAX_REGISTERED_CELLS 8
+#define MAX_REGISTERED_UES 64
+#define MAX_REGISTERED_NEIGHBOURS 8
+#define MAX_NUM_OF_RIC_INDICATIONS 3
+
+// === xApp 可調參數（供 AI 控制） ===
+#define MIN_SINR -10           // SINR 閾值（dB）
+#define PRB_THRESHOLD 40       // PRB 使用率上限（%）
+#define UE_THRESHOLD 3         // 每 cell 最少 UE 數量
+
+#endif // XAPP_CONFIG_H
+`, tool: "update_config" }
         ]
       },
       {
@@ -165,9 +185,13 @@ export class XappTrainer {
 
     // 執行流程
     for (const step of steps) {
+      // Step 15 前先休息 10 分鐘
+      if (step.name === "Step 15: 快取新KPI") {
+        console.log("⏳ 等待 10 分鐘再獲取新 KPI...");
+        await new Promise(res => setTimeout(res, 10 * 60 * 1000));
+      }
       for (const p of step.prompts) {
         try {
-          // 若 tool 為空，僅讓 LLM 回答，不強制工具觸發
           if (p.tool) {
             await ensureToolTriggered(this.chat, p.prompt, p.tool, step.name);
           } else {

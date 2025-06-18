@@ -15,6 +15,6 @@
   },
   "ollama": {
     "host": "http://10.8.0.26:11434",
-    "model": "myaniu/qwen2.5-1m:7b"
+    "model": "qwen3:latest"
   }
 }

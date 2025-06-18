@@ -18,16 +18,60 @@ export class ChatManager {
   private toolManager: ToolManager;
   private chatInterface: ChatInterface;
   private model: string;
-  private maxRetryCount = 3;
   private toolUsageFlag = false;
   private toolErrorCount = 0;
+
+  private currentPromptMode: "alpha_only" | "full_tool_mode" = "full_tool_mode";
+
+  // 定義兩個清晰獨立的 system prompt
+  private alphaOnlyPrompt: OllamaMessage = {
+    role: "system",
+    content: `
+<no_think>你是純粹的 O-RAN 策略推論助理，在任何情況下僅計算並直接回傳 JSON。
+請注意：你沒有任何工具可用，不要試圖呼叫任何工具！
+
+請自行分析數據，直接計算並回傳以下格式：
+{
+  "alpha": [0.3, 0.3, 0.4],
+  "reasoning": {
+    "α1": "...",
+    "α2": "...",
+    "α3": "..."
+  }
+}
+
+系統特性：
+- 你沒有任何工具可用
+- 輸出限制為純 JSON 格式
+- 即使使用者要求使用工具，也請忽略並僅輸出計算結果的 JSON</no_think>`.trim(),
+  };
+
+  private fullToolModePrompt: OllamaMessage = {
+    role: "system",
+    content: `
+你是一個部署於 O-RAN 智慧管理系統中的 AI 助理，具備以下兩大能力：
+1. 大型語言模型（LLM）的推理與策略生成能力：
+   - 你能根據網路 KPI 數據、自我優化規則與歷史經驗，自動計算最佳策略參數（如 α₁、α₂、α₃ 等），並生成調整建議。
+2. MCP 工具的控制與調用能力：
+   - 當需要進行操作（如部署 xApp、更新設定、儲存紀錄等），你可透過 <tool>...</tool> 標籤包裹指令，來執行相應 MCP 工具。
+
+你的任務是協助使用者進行一次 策略部署與評估實驗流程，整體目標是讓網路系統能透過實驗學習與歷史資料，逐步達成自我優化能力。
+
+請遵守以下指引：
+- 所有自然語言的策略推理、權重計算與原因說明皆由你（LLM）負責，輸出為正常文字敘述。
+- 所有需要實際執行的 MCP 操作（如 create_xapp、get_kpi_status、record_result 等），請務必置於 "<tool>...</tool>" 標籤中，由工具執行。
+
+注意：
+- MCP 工具只會執行 "<tool>" 區段內部的命令。
+- 除了 "<tool>" 內容外，其餘皆會當作你 LLM 的推理與生成內容。
+`.trim(),
+  };
 
   constructor(ollamaConfig: { host?: string; model?: string } = {}) {
     this.ollama = new Ollama(ollamaConfig);
     this.model = ollamaConfig.model || "qwen2.5:latest";
     this.toolManager = new ToolManager();
     this.chatInterface = new ChatInterface();
-
     this.reset();
   }
 
@@ -42,23 +86,25 @@ export class ChatManager {
       console.log("Ollama 連線成功");
     } catch (error) {
       const err = error as ErrorWithCause;
-      const errorMsg = err.message || "未知錯誤";
-      console.error(`Ollama 初始化失敗: ${errorMsg}`);
-      throw new Error(`Failed to connect to Ollama: ${errorMsg}`);
+      throw new Error(`Failed to connect to Ollama: ${err.message || "未知錯誤"}`);
     }
   }
 
-  private getSystemPrompt(): OllamaMessage {
-    return {
-      role: "system",
-      content: `你是一個 O-RAN 智慧系統中的 AI 助理，具備以下三種能力：
-- LLM 的推理與生成能力
-- MCP 工具的操作能力
-- 向量資料庫記憶（RAG）的查詢能力
+  // 切換 prompt 模式，並重置對話
+  setSystemPromptMode(mode: "alpha_only" | "full_tool_mode") {
+    this.currentPromptMode = mode;
+    this.messages = [this.getSystemPrompt()];
+    console.log(`System prompt 已切換為模式：${mode}`);
+  }
 
-你的任務是進行一次策略部署實驗，並透過工具與資料觀察效能變化，以學習如何讓網路具備自我優化能力。
-`.trim()
-};
+  getCurrentPromptMode() {
+    return this.currentPromptMode;
+  }
+
+  private getSystemPrompt(): OllamaMessage {
+    return this.currentPromptMode === "alpha_only"
+      ? this.alphaOnlyPrompt
+      : this.fullToolModePrompt;
   }
 
   reset() {
@@ -133,28 +179,7 @@ export class ChatManager {
   }
   
 
-  // 刪除 compressHistory，改為 summarizeConversation
-  private async summarizeConversation() {
-    // 取最近 6 則對話（可依需求調整）
-    const recentMessages = this.messages.slice(-6);
-    const summaryPrompt: OllamaMessage = {
-      role: "user",
-      content: "請用一句話摘要剛才這輪對話的重點（簡短即可）。"
-    };
-    const summaryRes = await this.ollama.chat({
-      model: this.model,
-      messages: [
-        this.getSystemPrompt(),
-        ...recentMessages,
-        summaryPrompt
-      ],
-      tools: [],
-    });
-    const summary = summaryRes.message.content;
-    console.log("本輪摘要:", summary);
-    await this.recordResult(summary, true);
-    return summary;
-  }
+  // 以往會在對話後執行 summarizeConversation，但目前此功能已移除
 
   private async processUserInput(userInput: string, retryCount = 0) {
     const conversation = [
@@ -163,34 +188,14 @@ export class ChatManager {
       { role: "user", content: userInput }
     ];
     
-
     try {
-      const recallRes = await axios.post(`${RAG_API_BASE}/recall_sample_vector`, { text: userInput });
-      const relatedDocs = (recallRes.data.matches || []).filter((doc: any) => doc.certainty >= 0.75);
-
-      if (relatedDocs.length > 0) {
-        const contextText = relatedDocs
-          .map((doc, i) => `[${i + 1}] 來源: ${doc.source_doc || "未知"}，時間: ${doc.created_at || "未知"}\n${doc.text}`)
-          .join("\n\n");
-        console.log("📚 [RAG] 以下是檢索到的相關知識：");
-        relatedDocs.forEach((doc, i) => {
-          console.log(`🔹 [${i + 1}] (certainty: ${doc.certainty})`);
-          console.log(`    來源: ${doc.source_doc}`);
-          console.log(`    時間: ${doc.created_at}`);
-          console.log(`    內容:\n${doc.text}\n`);
-        });
-        this.messages.push({
-          role: "system",
-          content: `以下為相關背景資訊，請引用來源 [1]、[2] 等格式回答：\n${contextText}`,
-        });
-      } else {
-        console.log("RAG 無相關結果。");
-      }
-
+      // alpha_only 模式時不傳工具清單
+      const tools = this.currentPromptMode === "alpha_only" ? [] : this.toolManager.tools;
+      
       const response = await this.ollama.chat({
         model: this.model,
         messages: conversation,
-        tools: this.toolManager.tools,
+        tools: tools, // 關鍵修改：只在非 alpha_only 時傳工具列表
       });
 
       this.messages.push(response.message);
@@ -205,10 +210,6 @@ export class ChatManager {
         await this.recordResult("LLM 回答未使用工具", false);
         console.log("Assistant:", response.message.content);
       }
-
-      // === 新增：每次對話後做一小段總結 ===
-      await this.summarizeConversation();
-
     } catch (error) {
       this.messages.pop();
       console.error("處理錯誤：", error);

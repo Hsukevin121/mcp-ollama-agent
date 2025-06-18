@@ -9,6 +9,7 @@ import path from "path";
 
 const app = express();
 app.use(cors());
+app.use(bodyParser.json());    // 確保能解析 JSON body
 const PORT = 3100;
 
 // 支援 JSON 請求
@@ -67,7 +68,6 @@ app.get("/api/models", async (_, res) => {
   }
 });
 
-
 // 重置對話 API
 app.post("/api/chat/new", async (_, res) => {
   try {
@@ -89,6 +89,24 @@ app.post("/api/train", async (_, res) => {
   } catch (err) {
     console.error("訓練流程失敗：", err);
     res.status(500).json({ error: "訓練失敗" });
+  }
+});
+
+// 切換 system prompt 模式
+app.post("/api/chat/mode", (req, res) => {
+  const { mode } = req.body as { mode?: string };
+  if (mode !== "alpha_only" && mode !== "full_tool_mode") {
+    return res
+      .status(400)
+      .json({ error: "mode 欄位錯誤，只能是 alpha_only 或 full_tool_mode" });
+  }
+
+  try {
+    chatManager.setSystemPromptMode(mode);
+    res.json({ message: "System prompt 已切換", mode });
+  } catch (err) {
+    console.error("切換 system prompt 失敗：", err);
+    res.status(500).json({ error: "切換 system prompt 失敗" });
   }
 });
 
