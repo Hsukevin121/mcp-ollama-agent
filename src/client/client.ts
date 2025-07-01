@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { HttpClientTransport } from "@modelcontextprotocol/sdk/client/http.js";
+import { SseClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 export function createClient(name: string, version: string): Client {
   return new Client(
@@ -20,7 +22,7 @@ export function createClient(name: string, version: string): Client {
 
 export async function connectClient(
   client: Client,
-  transport: StdioClientTransport
+  transport: StdioClientTransport | HttpClientTransport | SseClientTransport
 ): Promise<void> {
   console.log("Connecting to filesystem server...");
   await client.connect(transport);

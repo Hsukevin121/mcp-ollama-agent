@@ -10,6 +10,10 @@ export interface ServerConfig {
   env?: Record<string, string>;
   /** Optional working directory for the server process */
   cwd?: string;
+  /** Transport type: stdio (default), http, or sse */
+  transport?: "stdio" | "http" | "sse";
+  /** URL for HTTP/SSE transports */
+  url?: string;
 }
 
 /**
