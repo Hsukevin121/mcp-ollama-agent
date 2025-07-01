@@ -4,13 +4,19 @@
       "command": "node",
       "args": [
         "/home/smo/xapp-mcp-server/build/index.js"
-      ]
+      ],
+      "transport": "stdio"
     },
     "A1-mcp-server": {
       "command": "node",
       "args": [
         "/home/smo/a1-mcp-server/build/index.js"
-      ]
+      ],
+      "transport": "stdio"
+    },
+    "remote-mcp-server": {
+      "transport": "http",
+      "url": "http://192.168.1.100:8080"
     }
   },
   "ollama": {

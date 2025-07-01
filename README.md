@@ -39,16 +39,22 @@ This project demonstrates integration between [Model Context Protocol (MCP)](htt
 
    ```json
    {
-     "mcpServers": {
-       "filesystem": {
-         "command": "npx",
-         "args": ["@modelcontextprotocol/server-filesystem", "./"]
+   "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", "./"],
+        "transport": "stdio"
+      },
+      "webresearch": {
+        "command": "npx",
+        "args": ["-y", "@mzxrai/mcp-webresearch"],
+        "transport": "stdio"
        },
-       "webresearch": {
-         "command": "npx",
-         "args": ["-y", "@mzxrai/mcp-webresearch"]
-       }
-     },
+       "remote-xapp": {
+         "transport": "http",
+         "url": "http://192.168.1.100:8080"
+      }
+    },
      "ollama": {
        "host": "http://localhost:11434",
        "model": "qwen2.5:latest"
@@ -69,7 +75,9 @@ This project demonstrates integration between [Model Context Protocol (MCP)](htt
 
 ## ⚙️ Configuration
 
-- **MCP Servers:** Add any MCP-compatible server to the `mcpServers` section
+- **MCP Servers:** Add any MCP-compatible server to the `mcpServers` section. Each server
+  can now specify a `transport` of `stdio`, `http`, or `sse` and a `url` for remote
+  connections.
 - **Ollama:** Configure host and model (must support function calling)
 - Supports both Python (uvx) and Node.js (npx) MCP servers
 
